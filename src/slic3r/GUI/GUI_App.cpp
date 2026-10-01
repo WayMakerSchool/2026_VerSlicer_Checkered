@@ -11,6 +11,7 @@
 #include "slic3r/GUI/TaskManager.hpp"
 #include "format.hpp"
 #include "libslic3r_version.h"
+#include "libslic3r/GitCommitHash.hpp"
 #include "libslic3r/libslic3r.h"
 #include "Downloader.hpp"
 #include "MakerWorld/MakerWorldSearchService.hpp"

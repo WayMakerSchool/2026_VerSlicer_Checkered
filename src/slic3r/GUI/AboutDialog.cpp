@@ -10,6 +10,7 @@
 #include "Widgets/Button.hpp"
 
 #include <wx/clipbrd.h>
+#include "libslic3r/GitCommitHash.hpp"
 
 namespace {
 

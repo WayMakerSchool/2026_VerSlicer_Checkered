@@ -4,7 +4,12 @@ set -e
 set -o pipefail
 SECONDS=0
 
-while getopts ":dpa:snt:xbc:i:1TuhM" opt; do
+_BUILD_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck disable=SC1091
+source "${_BUILD_SCRIPT_DIR}/scripts/lib/ccache_and_jobs.sh"
+enable_ccache_env || true
+
+while getopts ":dpa:snt:xbc:i:j:1TuhM" opt; do
   case "${opt}" in
     d )
         export BUILD_TARGET="deps"
@@ -39,6 +44,9 @@ while getopts ":dpa:snt:xbc:i:1TuhM" opt; do
     i )
         export CMAKE_IGNORE_PREFIX_PATH="${CMAKE_IGNORE_PREFIX_PATH:+$CMAKE_IGNORE_PREFIX_PATH;}$OPTARG"
         ;;
+    j )
+        export CMAKE_BUILD_PARALLEL_LEVEL="$OPTARG"
+        ;;
     1 )
         export CMAKE_BUILD_PARALLEL_LEVEL=1
         ;;
@@ -62,6 +70,7 @@ while getopts ":dpa:snt:xbc:i:1TuhM" opt; do
         echo "   -b: Build without reconfiguring CMake"
         echo "   -c: Set CMake build configuration, default is Release"
         echo "   -i: Add a prefix to ignore during CMake dependency discovery (repeatable), defaults to /opt/local:/usr/local:/opt/homebrew"
+        echo "   -j: Parallel jobs (default: RAM-sized cap)"
         echo "   -1: Use single job for building"
         echo "   -T: Build and run tests"
         echo "   -M: After build, create signed distributable .dmg (scripts/package_macos_dmg.sh)"
@@ -107,6 +116,30 @@ if [ -z "$CMAKE_IGNORE_PREFIX_PATH" ]; then
   export CMAKE_IGNORE_PREFIX_PATH="/opt/local:/usr/local:/opt/homebrew"
 fi
 
+if [ -z "${CMAKE_BUILD_PARALLEL_LEVEL:-}" ]; then
+  export CMAKE_BUILD_PARALLEL_LEVEL="$(macos_default_build_jobs)"
+fi
+
+CCACHE_CMAKE_LAUNCHER_ARGS=()
+if command -v ccache >/dev/null 2>&1; then
+  CCACHE_CMAKE_LAUNCHER_ARGS=(
+    -DCMAKE_C_COMPILER_LAUNCHER=ccache
+    -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+  )
+fi
+
+LZMA_CMAKE_ARGS=()
+if command -v brew >/dev/null 2>&1; then
+  XZ_PREFIX="$(brew --prefix xz 2>/dev/null || true)"
+  SDK_PATH="$(xcrun --show-sdk-path 2>/dev/null || true)"
+  if [ -n "${XZ_PREFIX}" ] && [ -f "${XZ_PREFIX}/include/lzma.h" ] && [ -n "${SDK_PATH}" ] && [ ! -f "${SDK_PATH}/usr/include/lzma.h" ]; then
+    LZMA_CMAKE_ARGS=(
+      -DLIBLZMA_INCLUDE_DIR="${XZ_PREFIX}/include"
+      -DLIBLZMA_LIBRARY="${SDK_PATH}/usr/lib/liblzma.tbd"
+    )
+  fi
+fi
+
 CMAKE_VERSION=$(cmake --version | head -1 | sed 's/[^0-9]*\([0-9]*\).*/\1/')
 if [ "$CMAKE_VERSION" -ge 4 ] 2>/dev/null; then
   export CMAKE_POLICY_VERSION_MINIMUM=3.5
@@ -123,6 +156,12 @@ echo " - BUILD_TARGET: $BUILD_TARGET"
 echo " - CMAKE_GENERATOR: $SLICER_CMAKE_GENERATOR for Slicer, $DEPS_CMAKE_GENERATOR for deps"
 echo " - OSX_DEPLOYMENT_TARGET: $OSX_DEPLOYMENT_TARGET"
 echo " - CMAKE_IGNORE_PREFIX_PATH: $CMAKE_IGNORE_PREFIX_PATH"
+echo " - JOBS: $CMAKE_BUILD_PARALLEL_LEVEL"
+if command -v ccache >/dev/null 2>&1; then
+  echo " - ccache: $(command -v ccache)"
+else
+  echo " - ccache: not installed (./scripts/setup_dev_env.sh)"
+fi
 echo
 
 # if which -s brew; then
@@ -159,6 +198,7 @@ function build_deps() {
             (
                 set -x
                 mkdir -p "$DEPS"
+                mark_dirs_unindexed "$DEPS_DIR" "$DEPS_BUILD_DIR" "$PROJECT_DIR/build"
                 cd "$DEPS_BUILD_DIR"
                 if [ "1." != "$BUILD_ONLY". ]; then
                     cmake "${DEPS_DIR}" \
@@ -167,7 +207,9 @@ function build_deps() {
                         -DCMAKE_OSX_ARCHITECTURES:STRING="${_ARCH}" \
                         -DCMAKE_OSX_DEPLOYMENT_TARGET="${OSX_DEPLOYMENT_TARGET}" \
                         -DCMAKE_IGNORE_PREFIX_PATH="${CMAKE_IGNORE_PREFIX_PATH}" \
-                        ${CMAKE_POLICY_COMPAT}
+                        ${CMAKE_POLICY_COMPAT} \
+                        "${CCACHE_CMAKE_LAUNCHER_ARGS[@]}" \
+                        "${LZMA_CMAKE_ARGS[@]}"
                 fi
                 cmake --build . --config "$BUILD_CONFIG" --target deps
             )
@@ -198,6 +240,7 @@ function build_slicer() {
             (
                 set -x
             mkdir -p "$PROJECT_BUILD_DIR"
+            mark_dirs_unindexed "$PROJECT_DIR/build" "$PROJECT_BUILD_DIR" "$DEPS_DIR"
             cd "$PROJECT_BUILD_DIR"
             if [ "1." != "$BUILD_ONLY". ]; then
                 cmake "${PROJECT_DIR}" \
@@ -206,10 +249,13 @@ function build_slicer() {
                     ${ORCA_UPDATER_SIG_KEY:+-DORCA_UPDATER_SIG_KEY="$ORCA_UPDATER_SIG_KEY"} \
                     ${BUILD_TESTS:+-DBUILD_TESTS=ON} \
                     -DCMAKE_BUILD_TYPE="$BUILD_CONFIG" \
+                    -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
                     -DCMAKE_OSX_ARCHITECTURES="${_ARCH}" \
                     -DCMAKE_OSX_DEPLOYMENT_TARGET="${OSX_DEPLOYMENT_TARGET}" \
                     -DCMAKE_IGNORE_PREFIX_PATH="${CMAKE_IGNORE_PREFIX_PATH}" \
-                    ${CMAKE_POLICY_COMPAT}
+                    ${CMAKE_POLICY_COMPAT} \
+                    "${CCACHE_CMAKE_LAUNCHER_ARGS[@]}" \
+                    "${LZMA_CMAKE_ARGS[@]}"
             fi
             if [ "1." == "$BUILD_TESTS". ]; then
                 cmake --build . --config "$BUILD_CONFIG" --target "$SLICER_BUILD_TARGET"

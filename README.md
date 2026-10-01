@@ -274,17 +274,30 @@ Environment overrides: `OLLAMA_ASSIST_LOOP`, `OLLAMA_ASSIST_MAX_STEPS`, `OLLAMA_
 
 **Requirements:** macOS 11.3+, Xcode or CLT, CMake 3.13+.
 
+Daily iteration uses a Debug tree. Release packaging stays separate so the two do not invalidate each other.
+
+```bash
+./scripts/setup_dev_env.sh          # ccache, ninja, clangd, Spotlight/Time Machine exclusions
+./build_dev_macos.sh -C             # configure build/<arch>-dev
+./build_dev_macos.sh -t ollama_pipeline_test
+./build_dev_macos.sh                # Debug app
+```
+
+**Dev output:** `build/<arch>-dev/src/verslicer.app`
+
+Release:
+
 ```bash
 ./build_release_macos.sh       # dependencies + app
 ./build_release_macos.sh -x    # Ninja (recommended)
 ./build_release_macos.sh -s    # app only
 ```
 
-**Output:** `build/<arch>/src/Release/verslicer.app`
+**Release output:** `build/<arch>/src/Release/verslicer.app`
 
 ```bash
 cd build/arm64
-ninja -f build-Release.ninja -j4 src/Release/verslicer.app/Contents/MacOS/verslicer
+ninja -f build-Release.ninja src/Release/verslicer.app/Contents/MacOS/verslicer
 open src/Release/verslicer.app
 ```
 

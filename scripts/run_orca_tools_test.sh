@@ -1,23 +1,37 @@
 #!/usr/bin/env bash
-# Stop, rebuild, and run ORCA_TOOLS dev-utils tests (Ollama + MakerWorld).
+# Build and run ORCA_TOOLS dev-utils tests (Ollama + MakerWorld).
 #
 # Usage:
 #   ./scripts/run_orca_tools_test.sh stop          # stop running builds, clean PCH tmp
 #   ./scripts/run_orca_tools_test.sh build         # build test targets only
 #   ./scripts/run_orca_tools_test.sh test          # run ctest (no build)
-#   ./scripts/run_orca_tools_test.sh               # stop stale builds, build, test
+#   ./scripts/run_orca_tools_test.sh               # incremental build, then test
 #
 # Env:
-#   BUILD_DIR   default: build/$(uname -m) under repo root
-#   JOBS        parallel jobs after libslic3r PCH (default: ncpu)
+#   BUILD_DIR   default: build/<arch>-dev if configured, else build/<arch>
+#   CONFIG      Debug for the dev tree, Release otherwise
+#   JOBS        parallel jobs (default: RAM-sized cap)
 
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck disable=SC1091
+source "${ROOT_DIR}/scripts/lib/ccache_and_jobs.sh"
+enable_ccache_env || true
 ARCH="$(uname -m)"
-BUILD_DIR="${BUILD_DIR:-${ROOT_DIR}/build/${ARCH}}"
-CONFIG="${CONFIG:-Release}"
-JOBS="${JOBS:-$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)}"
+if [ -z "${BUILD_DIR:-}" ]; then
+    if [ -f "${ROOT_DIR}/build/${ARCH}-dev/build.ninja" ]; then
+        BUILD_DIR="${ROOT_DIR}/build/${ARCH}-dev"
+    else
+        BUILD_DIR="${ROOT_DIR}/build/${ARCH}"
+    fi
+fi
+if [[ "${BUILD_DIR}" == *-dev ]]; then
+    CONFIG="${CONFIG:-Debug}"
+else
+    CONFIG="${CONFIG:-Release}"
+fi
+JOBS="${JOBS:-$(macos_default_build_jobs)}"
 
 TEST_TARGETS=(
     ollama_assistant_test
@@ -60,10 +74,9 @@ build_tests() {
     cleanup_pch_tmp
     cd "${BUILD_DIR}"
 
-    echo "Building libslic3r PCH (single-threaded)..."
-    cmake --build . --config "${CONFIG}" --target libslic3r -j1
-
-    echo "Building test targets (-j${JOBS})..."
+    # Native target_precompile_headers (CMake >= 3.16) orders PCH before
+    # consumers, so the old -j1 libslic3r prelude is not required.
+    echo "Building test targets (-j${JOBS}, ${CONFIG})..."
     cmake --build . --config "${CONFIG}" --target "${TEST_TARGETS[@]}" -j"${JOBS}"
 }
 
@@ -91,7 +104,6 @@ case "${cmd}" in
         run_tests
         ;;
     all|"")
-        stop_builds
         build_tests
         run_tests
         ;;

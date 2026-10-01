@@ -888,7 +888,21 @@ if (WIN32)
 else ()
     add_library(libslic3r_gui STATIC ${SLIC3R_GUI_SOURCES})
 endif ()
-target_include_directories(libslic3r_gui PRIVATE Utils ${CMAKE_CURRENT_BINARY_DIR})
+target_include_directories(libslic3r_gui PRIVATE Utils ${CMAKE_CURRENT_BINARY_DIR} "${CMAKE_BINARY_DIR}/src/libslic3r")
+if(TARGET git_commit_hash)
+    add_dependencies(libslic3r_gui git_commit_hash)
+endif()
+set_source_files_properties(
+    GUI/GUI_App.cpp
+    GUI/AboutDialog.cpp
+    PROPERTIES OBJECT_DEPENDS "${CMAKE_BINARY_DIR}/src/libslic3r/git_commit_hash.h"
+)
+if(WIN32)
+    set_source_files_properties(
+        ../dev-utils/BaseException.cpp
+        PROPERTIES OBJECT_DEPENDS "${CMAKE_BINARY_DIR}/src/libslic3r/git_commit_hash.h"
+    )
+endif()
 
 if (WIN32)
     target_include_directories(libslic3r_gui SYSTEM PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../deps/WebView2/include)

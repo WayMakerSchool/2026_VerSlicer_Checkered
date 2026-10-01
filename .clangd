@@ -1,0 +1,16 @@
+CompileFlags:
+  CompilationDatabase: .
+  Add:
+    - -Wno-unused-command-line-argument
+Index:
+  Background: Build
+Diagnostics:
+  UnusedIncludes: None
+  MissingIncludes: None
+PathExclude:
+  - build
+  - deps
+  - deps_src
+  - resources
+  - localization
+  - sandboxes

@@ -282,6 +282,7 @@ else ()
             VERBATIM)
         # Keep ${CMAKE_BINARY_DIR}/OrcaSlicer/Verslicer.app in sync with the real bundle (src/<Config>/verslicer.app).
         add_custom_command(TARGET OrcaSlicer POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/OrcaSlicer"
             COMMAND ${CMAKE_COMMAND} -E rm -rf "${CMAKE_BINARY_DIR}/OrcaSlicer/Verslicer.app"
             COMMAND ${CMAKE_COMMAND} -E create_symlink
                 "$<TARGET_BUNDLE_DIR:OrcaSlicer>"

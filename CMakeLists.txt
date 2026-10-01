@@ -85,31 +85,37 @@ else ()
 endif ()
 
 find_package(Git)
-if(DEFINED ENV{git_commit_hash} AND NOT "$ENV{git_commit_hash}" STREQUAL "")
-    message(STATUS "Specified git commit hash: $ENV{git_commit_hash}")
-    if(GIT_FOUND AND EXISTS "${CMAKE_SOURCE_DIR}/.git")
-        # Convert the given hash to short hash
-        execute_process(
-            COMMAND ${GIT_EXECUTABLE} rev-parse --short "$ENV{git_commit_hash}"
-            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-            OUTPUT_VARIABLE GIT_COMMIT_HASH
-            OUTPUT_STRIP_TRAILING_WHITESPACE
-        )
-    else()
-        # No .git directory (e.g., Flatpak sandbox) — truncate directly
-        string(SUBSTRING "$ENV{git_commit_hash}" 0 7 GIT_COMMIT_HASH)
-    endif()
-    add_definitions("-DGIT_COMMIT_HASH=\"${GIT_COMMIT_HASH}\"")
-elseif(GIT_FOUND AND EXISTS "${CMAKE_SOURCE_DIR}/.git")
-    # Check current Git commit hash
-    execute_process(
-        COMMAND ${GIT_EXECUTABLE} log -1 --format=%h
-        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-        OUTPUT_VARIABLE GIT_COMMIT_HASH
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-    )
-    add_definitions("-DGIT_COMMIT_HASH=\"${GIT_COMMIT_HASH}\"")
+# Hash lives in a generated header included by a few TUs. A global -D would
+# change every compile command, including the PCH, on each commit.
+set(GIT_COMMIT_HASH_HEADER "${CMAKE_BINARY_DIR}/src/libslic3r/git_commit_hash.h")
+file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/src/libslic3r")
+set(_git_hash_stamp_deps "${CMAKE_SOURCE_DIR}/cmake/update_git_commit_hash.cmake")
+if(EXISTS "${CMAKE_SOURCE_DIR}/.git/logs/HEAD")
+    list(APPEND _git_hash_stamp_deps "${CMAKE_SOURCE_DIR}/.git/logs/HEAD")
 endif()
+execute_process(
+    COMMAND ${CMAKE_COMMAND}
+        -DGIT_EXECUTABLE=${GIT_EXECUTABLE}
+        -DSOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -DOUT_FILE=${GIT_COMMIT_HASH_HEADER}
+        -P ${CMAKE_SOURCE_DIR}/cmake/update_git_commit_hash.cmake
+    RESULT_VARIABLE _git_hash_rc
+)
+if(NOT _git_hash_rc EQUAL 0)
+    message(FATAL_ERROR "Failed to write ${GIT_COMMIT_HASH_HEADER}")
+endif()
+add_custom_command(
+    OUTPUT "${GIT_COMMIT_HASH_HEADER}"
+    COMMAND ${CMAKE_COMMAND}
+        -DGIT_EXECUTABLE=${GIT_EXECUTABLE}
+        -DSOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -DOUT_FILE=${GIT_COMMIT_HASH_HEADER}
+        -P ${CMAKE_SOURCE_DIR}/cmake/update_git_commit_hash.cmake
+    DEPENDS ${_git_hash_stamp_deps}
+    COMMENT "Updating git commit hash"
+    VERBATIM
+)
+add_custom_target(git_commit_hash DEPENDS "${GIT_COMMIT_HASH_HEADER}")
 
 if(DEFINED ENV{SLIC3R_STATIC})
     set(SLIC3R_STATIC_INITIAL $ENV{SLIC3R_STATIC})
@@ -122,6 +128,7 @@ option(SLIC3R_GUI               "Compile OrcaSlicer with GUI components (OpenGL,
 option(SLIC3R_FHS               "Assume OrcaSlicer is to be installed in a FHS directory structure" 0)
 option(SLIC3R_PROFILE           "Compile OrcaSlicer with an invasive Shiny profiler" 0)
 option(SLIC3R_PCH               "Use precompiled headers" 1)
+option(SLIC3R_DEV_FAST          "Debug iteration: -g1 and skip Mach-O dedup" OFF)
 option(SLIC3R_MSVC_COMPILE_PARALLEL "Compile on Visual Studio in parallel" 1)
 option(SLIC3R_MSVC_PDB          "Generate PDB files on MSVC in Release mode" 1)
 option(SLIC3R_ASAN              "Enable ASan on Clang and GCC" 0)
@@ -612,6 +619,7 @@ if(SLIC3R_STATIC)
 endif()
 set(TBB_DEBUG 1)
 set(CMAKE_MAP_IMPORTED_CONFIG_RELWITHDEBINFO RelWithDebInfo Release "")
+set(CMAKE_MAP_IMPORTED_CONFIG_DEBUG Debug Release "")
 find_package(TBB REQUIRED)
 # include_directories(SYSTEM ${TBB_INCLUDE_DIRS})
 # add_definitions(${TBB_DEFINITIONS})
@@ -884,6 +892,21 @@ function(orcaslicer_copy_dlls target config postfix output_dlls)
 
 endfunction()
 
+
+if(SLIC3R_DEV_FAST AND NOT MSVC)
+    foreach(_dev_fast_lang C CXX)
+        if(CMAKE_${_dev_fast_lang}_FLAGS_DEBUG MATCHES "(^| )-g( |$)")
+            string(REGEX REPLACE "(^| )-g( |$)" "\\1-g1\\2" CMAKE_${_dev_fast_lang}_FLAGS_DEBUG "${CMAKE_${_dev_fast_lang}_FLAGS_DEBUG}")
+        else()
+            string(APPEND CMAKE_${_dev_fast_lang}_FLAGS_DEBUG " -g1")
+        endif()
+        string(APPEND CMAKE_${_dev_fast_lang}_FLAGS_DEBUG " -fno-standalone-debug")
+    endforeach()
+    message(STATUS "SLIC3R_DEV_FAST Debug C++ flags: ${CMAKE_CXX_FLAGS_DEBUG}")
+endif()
+if(SLIC3R_DEV_FAST AND APPLE)
+    add_link_options("$<$<CONFIG:Debug>:-Wl,-no_deduplicate>")
+endif()
 
 # libslic3r, OrcaSlicer GUI and the OrcaSlicer executable.
 add_subdirectory(deps_src)

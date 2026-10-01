@@ -1,0 +1,17 @@
+{
+  "files.watcherExclude": {
+    "**/build/**": true,
+    "**/deps/**": true,
+    "**/deps_src/**": true
+  },
+  "search.exclude": {
+    "**/build/**": true,
+    "**/deps/**": true
+  },
+  "C_Cpp.intelliSenseEngine": "disabled",
+  "clangd.arguments": [
+    "--background-index",
+    "--header-insertion=never",
+    "--pch-storage=memory"
+  ]
+}
